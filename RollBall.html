@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Forest Physics Puzzle - Mobile Optimized</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+<style>
+body {
+  margin:0;
+  overflow:hidden;
+  background: linear-gradient(to bottom, #0f2b1c 0%, #1a4a2a 40%, #2e7a3c 70%, #4a9e4d 100%);
+  touch-action: none; /* Prevents pull-to-refresh and scrolling on mobile */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* UI Layout Fixes */
+.ui-panel {
+  backdrop-filter:blur(14px);
+  background:rgba(0, 0, 0, 0.5);
+  padding:12px;
+  border-radius:16px;
+  display:flex;
+  align-items: center;
+  flex-wrap: wrap; /* Allows wrapping on thin phone screens */
+  gap:10px;
+  color:#e0ffe0;
+  border: 1px solid rgba(168, 255, 120, 0.2);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  box-sizing: border-box;
+}
+
+.ui-left {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  max-width: calc(100vw - 140px); /* Protects space for the launch button */
+}
+
+.ui-right {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+}
+
+#levelDisplay { 
+  font-weight: bold; 
+  font-size: 16px;
+  padding: 0 4px; 
+}
+
+select, button {
+  background: rgba(255,255,255,0.1);
+  color: white;
+  border: 1px solid rgba(168, 255, 120, 0.4);
+  border-radius: 8px;
+  padding: 10px 14px; /* Larger touch targets */
+  font-size: 15px;
+  outline: none;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+select option { background: #1a4a2a; }
+button:hover { background:rgba(168, 255, 120, 0.4); }
+
+/* BIG, UNIQUE LAUNCH BUTTON */
+#launchBtn {
+  background: linear-gradient(135deg, #ff7e67, #ffcf33);
+  color: #1a4a2a;
+  font-size: 18px;
+  padding: 12px 24px;
+  border: 2px solid #fff;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 0 0 15px rgba(255, 126, 103, 0.6);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); box-shadow: 0 0 15px rgba(255, 126, 103, 0.6); }
+  50% { transform: scale(1.05); box-shadow: 0 0 25px rgba(255, 126, 103, 0.9); }
+  100% { transform: scale(1); box-shadow: 0 0 15px rgba(255, 126, 103, 0.6); }
+}
+
+#win {
+  position:fixed;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  background:rgba(15, 43, 28, 0.95);
+  border: 2px solid #a8ff78;
+  padding:30px 40px;
+  border-radius:18px;
+  color:#a8ff78;
+  display:none;
+  z-index:20;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(168, 255, 120, 0.5);
+}
+
+#win h2 { margin-top: 0; font-size: 28px; }
+
+canvas.fx {
+  position:fixed;
+  top:0;
+  left:0;
+  pointer-events:none;
+  z-index: 1;
+}
+</style>
+</head>
+
+<body>
+
+<div class="ui-left ui-panel">
+  <span id="levelDisplay">Level 1</span>
+  <select id="ballMaterial" onchange="changeBall()">
+    <option value="plastic">Plastic</option>
+    <option value="rubber">Rubber</option>
+    <option value="metal">Metal</option>
+  </select>
+  <button onclick="resetGame()">Reset</button>
+  <button onclick="nextLevel()">Skip ⏭</button>
+  <button id="audioBtn" onclick="initAudio()">🔇 Audio</button>
+</div>
+
+<div class="ui-right">
+  <button id="launchBtn" onclick="launchBall()">Launch</button>
+</div>
+
+<div id="win">
+  <h2>Shattered! ✨</h2>
+  <button onclick="nextLevel()" style="font-size: 18px; padding: 12px 24px; background: #a8ff78; color: #0f2b1c;">Next Level</button>
+</div>
+
+<canvas class="fx"></canvas>
+
+<script>
+/** AUDIO SYSTEM **/
+let actx;
+let audioEnabled = false;
+let pianoInterval;
+
+function initAudio() {
+  if(audioEnabled) return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  actx = new AudioContext();
+  actx.resume();
+  audioEnabled = true;
+  document.getElementById("audioBtn").innerText = "🔊 Audio";
+  
+  let notes = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25]; 
+  
+  pianoInterval = setInterval(() => {
+    if(!audioEnabled) return;
+    if(Math.random() > 0.4) { 
+      let freq = notes[Math.floor(Math.random() * notes.length)];
+      if(Math.random() > 0.8) freq /= 2; 
+      
+      let t = actx.currentTime;
+      let osc = actx.createOscillator();
+      let gain = actx.createGain();
+      osc.type = 'sine'; 
+      osc.frequency.value = freq;
+      
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.08, t + 0.05); 
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 3.0); 
+      
+      osc.connect(gain); gain.connect(actx.destination);
+      osc.start(t); osc.stop(t + 3.0);
+    }
+  }, 600);
+}
+
+function playBounce(speed) {
+  if(!audioEnabled) return;
+  let t = actx.currentTime;
+  let osc = actx.createOscillator();
+  let gain = actx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(300 + (speed * 20), t);
+  osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+  gain.gain.setValueAtTime(Math.min(speed * 0.02, 0.1), t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  osc.connect(gain); gain.connect(actx.destination);
+  osc.start(); osc.stop(t + 0.1);
+}
+
+function playShatter() {
+  if(!audioEnabled) return;
+  let t = actx.currentTime;
+  
+  let bufferSize = actx.sampleRate * 0.15; 
+  let buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+  let data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  
+  let noise = actx.createBufferSource();
+  noise.buffer = buffer;
+  let noiseGain = actx.createGain();
+  let filter = actx.createBiquadFilter();
+  filter.type = 'highpass'; filter.frequency.value = 3500; 
+  
+  noiseGain.gain.setValueAtTime(0.6, t);
+  noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+  
+  noise.connect(filter); filter.connect(noiseGain); noiseGain.connect(actx.destination);
+  noise.start(t);
+
+  for(let i=0; i<4; i++) {
+    let osc = actx.createOscillator();
+    let g2 = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 4000 + Math.random() * 5000; 
+    g2.gain.setValueAtTime(0.1, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1 + Math.random() * 0.2);
+    osc.connect(g2); g2.connect(actx.destination);
+    osc.start(t); osc.stop(t + 0.4);
+  }
+}
+
+/** PHYSICS ENGINE **/
+const {Engine,Render,Runner,Bodies,Composite,Events,Body,Vector,Bounds} = Matter;
+const engine = Engine.create();
+engine.gravity.y = 0.5;
+const world = engine.world;
+
+const render = Render.create({
+  element:document.body,
+  engine:engine,
+  options:{width:innerWidth,height:innerHeight,wireframes:false, background: 'transparent'}
+});
+Render.run(render);
+Runner.run(Runner.create(),engine);
+
+const fx = document.querySelector(".fx");
+fx.width = innerWidth; fx.height = innerHeight;
+const ctx = fx.getContext("2d");
+
+// Handle resize for mobile rotation
+window.addEventListener('resize', () => {
+  render.canvas.width = innerWidth;
+  render.canvas.height = innerHeight;
+  fx.width = innerWidth;
+  fx.height = innerHeight;
+});
+
+/** GAME STATE **/
+let currentLevel = 0;
+let maxLevels = 10;
+let ball, launched=false, levelWon=false;
+let ballType = "plastic";
+let teleportCooldown = 0; 
+
+const ballProps = {
+  plastic: { res: 0.3, den: 0.0005, air: 0.005, color: "#fdf8e1", stroke: "#d6cf98" }, 
+  rubber:  { res: 0.9, den: 0.002, air: 0.0005, color: "#ff6b6b", stroke: "#cc0000" }, 
+  metal:   { res: 0.05, den: 0.015, air: 0.00005, color: "#95a5a6", stroke: "#4b5758" }    
+};
+
+function changeBall() {
+  ballType = document.getElementById("ballMaterial").value;
+  resetGame();
+}
+
+function createBall(startX, startY){
+  if(ball) Composite.remove(world,ball);
+  let props = ballProps[ballType];
+  
+  ball=Bodies.circle(startX,startY,15,{
+    restitution: props.res, density: props.den, friction: 0.0001, frictionAir: props.air,
+    render: { visible: false } 
+  });
+  Body.setStatic(ball,true);
+  Composite.add(world,ball);
+}
+
+/** TARGET & EFFECTS **/
+let glass;
+function createGlass(x, y){
+  if(glass) Composite.remove(world,glass);
+  glass=Bodies.polygon(x, y, 6, 35, {
+    isStatic:true, isSensor:true, render:{ fillStyle:"rgba(255, 255, 255, 0)" } 
+  });
+  Composite.add(world,glass);
+}
+
+function shatterGlassEffect(x, y) {
+  playShatter();
+  let shards = [];
+  for(let i=0; i<6; i++) {
+    let shard = Bodies.polygon(x, y, 3, 12 + Math.random()*10, {
+      restitution: 0.6, friction: 0.01,
+      render: { fillStyle: "rgba(168, 255, 120, 0.7)", strokeStyle: "#a8ff78", lineWidth: 2 }
+    });
+    Body.setVelocity(shard, { x: (Math.random()-0.5)*15, y: (Math.random()-0.5)*15 });
+    Body.setAngularVelocity(shard, (Math.random()-0.5));
+    shards.push(shard);
+  }
+  Composite.add(world, shards);
+  setTimeout(() => { document.getElementById("win").style.display="block"; }, 800);
+}
+
+/** OBSTACLE FACTORIES **/
+let objs=[];
+function addObj(o) { objs.push(o); Composite.add(world, o); }
+
+function createSpike(x, y, size=25) {
+  let spike = Bodies.polygon(x, y, 3, size, {
+    isStatic: true, angle: -Math.PI/2,
+    render: { fillStyle: '#e74c3c', strokeStyle: '#c0392b', lineWidth: 2 }
+  });
+  spike.isSpike = true;
+  return spike;
+}
+
+function createPortalPair(x1, y1, x2, y2, color) {
+  let p1 = Bodies.circle(x1, y1, 25, {isStatic: true, isSensor: true, render: {visible: false}});
+  let p2 = Bodies.circle(x2, y2, 25, {isStatic: true, isSensor: true, render: {visible: false}});
+  p1.isPortal = true; p1.target = p2; p1.color = color;
+  p2.isPortal = true; p2.target = p1; p2.color = color;
+  addObj(p1); addObj(p2);
+}
+
+function createSpinner(x, y, w, h, speed) {
+  let s = Bodies.rectangle(x, y, w, h, {isStatic: true, render: {fillStyle: '#86c232'}});
+  s.isSpinner = true; s.spinSpeed = speed; return s;
+}
+
+function createPatrol(x, y, w, h, rangeX, rangeY, speed) {
+  let m = Bodies.rectangle(x, y, w, h, {isStatic: true, render: {fillStyle: '#86c232'}});
+  m.isPatrol = true; m.startX = x; m.startY = y;
+  m.patrolRangeX = rangeX; m.patrolRangeY = rangeY; m.patrolSpeed = speed; m.offset = Math.random()*100; 
+  return m;
+}
+
+/** DYNAMIC LEVELS **/
+function loadLevel(){
+  objs.forEach(o=>Composite.remove(world,o));
+  objs=[];
+  let w = innerWidth, h = innerHeight;
+  let glassX = w - 60, glassY = h - 150; // default target
+  let startX = Math.min(80, w*0.2), startY = 120; // safe mobile spawn
+
+  switch(currentLevel) {
+    case 0: // Level 1: The Great Wall
+      addObj(Bodies.rectangle(w/2, h/2, 20, h*0.6, {isStatic:true, render:{fillStyle:'#5e4624'}}));
+      glassX = w - 60; glassY = h - 100;
+      break;
+
+    case 1: // Level 2: The Blocked Ceiling
+      addObj(Bodies.rectangle(w/2, h/2 - 50, w*0.8, 20, {isStatic:true, render:{fillStyle:'#5e4624'}}));
+      addObj(createSpike(w/2, h/2 - 75, 25)); 
+      createPortalPair(startX, h - 100, w - 80, 150, "#d252ff"); 
+      glassX = w - 80; glassY = h - 80;
+      break;
+
+    case 2: // Level 3: The Swinging Pendulum
+      let anchorX = w/2, anchorY = h*0.25;
+      let pendulum = Bodies.rectangle(anchorX, anchorY + h*0.3, 40, h*0.2, {density: 0.05, render:{fillStyle:'#5e4624'}});
+      let constraint = Matter.Constraint.create({pointA: {x: anchorX, y: anchorY}, bodyB: pendulum, pointB: {x: 0, y: -h*0.1}, stiffness: 1, length: 0, render: { strokeStyle: '#a8ff78', lineWidth: 4 }});
+      Matter.Body.setVelocity(pendulum, {x: 12, y: 0});
+      addObj(pendulum); Composite.add(world, constraint);
+      
+      addObj(Bodies.rectangle(w - 120, h - 150, 20, 300, {isStatic:true, render:{fillStyle:'#5e4624'}}));
+      glassX = w - 50; glassY = h - 100;
+      break;
+
+    case 3: // Level 4: Spike Pit & Wind Tunnel
+      for(let i=0; i<w/30; i++) {
+        if(i < w/120 || i > (w/30 - w/120)) { 
+           addObj(createSpike(30 + i*30, h - 30, 25));
+        }
+      }
+      let updraft = Bodies.rectangle(w/2, h/2, w*0.4, h, {isStatic:true, isSensor:true, render:{visible:false}});
+      updraft.isUpdraft = true; updraft.forceAmt = -0.0035; addObj(updraft);
+      glassX = w/2; glassY = 100;
+      break;
+
+    case 4: // Level 5: Dangerous Portal Drop
+      addObj(Bodies.rectangle(w/2, h/2, w*0.6, 20, {isStatic:true, render:{fillStyle:'#5e4624'}})); 
+      addObj(createSpike(w/2, h/2 - 25, 30)); 
+      createPortalPair(w/2 - 100, h - 100, w/2 + 100, 100, "#00e5ff"); 
+      glassX = w - 60; glassY = h - 100;
+      break;
+
+    case 5: // Level 6: The Windmill Maze
+      addObj(createSpinner(w/2, h/2, w*0.6, 25, 0.04));
+      createPortalPair(80, h - 100, w/2, 100, "#ffcf33"); 
+      addObj(Bodies.rectangle(w - 100, h - 100, 20, 200, {isStatic:true, render:{fillStyle:'#5e4624'}}));
+      addObj(Bodies.rectangle(w - 50, h - 10, 100, 20, {isStatic:true, render:{fillStyle:'#5e4624'}}));
+      glassX = w - 50; glassY = h - 60;
+      break;
+
+    case 6: // Level 7: Floating Islands
+      addObj(createPatrol(w/2, h*0.4, w*0.4, 20, 150, 0, 0.02));
+      addObj(createPatrol(w/2, h*0.7, w*0.4, 20, -150, 0, 0.02));
+      glassX = w - 80; glassY = h - 100;
+      break;
+
+    case 7: // Level 8: Wind Tunnel into Thorns
+      let tunnel = Bodies.rectangle(w/2, h*0.3, w, 150, {isStatic:true, isSensor:true, render:{visible:false}});
+      tunnel.isCurrent = true; tunnel.forceDir = {x: 0.003, y: 0}; addObj(tunnel);
+      addObj(createSpike(w - 80, h*0.5, 40));
+      glassX = w - 80; glassY = h - 100;
+      break;
+
+    case 8: // Level 9: Double Portal Puzzle
+      createPortalPair(w*0.3, h - 100, w/2, 150, "#d252ff"); 
+      createPortalPair(w/2, h - 100, w - 80, 150, "#00e5ff"); 
+      addObj(Bodies.rectangle(w/2, h/2, 20, h*0.6, {isStatic:true, render:{fillStyle:'#5e4624'}})); 
+      glassX = w - 80; glassY = h - 80;
+      break;
+
+    case 9: // Level 10: The Grand Masterpiece
+      addObj(createSpinner(w/2, h/2, w*0.5, 20, 0.05));
+      let up = Bodies.rectangle(w/2, h/2, w*0.4, h, {isStatic:true, isSensor:true, render:{visible:false}});
+      up.isUpdraft = true; up.forceAmt = -0.003; addObj(up);
+      for(let i=0; i<3; i++) {
+        let spk = createSpike(w/2 - w*0.2, h*0.3 + (i*100), 20);
+        Body.setAngle(spk, Math.PI/2); 
+        addObj(spk);
+      }
+      createPortalPair(w/2, h - 100, w - 100, 150, "#ffcf33");
+      glassX = w - 100; glassY = h - 150;
+      break;
+  }
+  createGlass(glassX, glassY);
+  createBall(startX, startY);
+}
+
+/** DRAW SYSTEM **/
+let drawing=false;
+let points=[];
+let paths=[];
+
+function startDraw(x,y){
+  if(y < 120 || launched || levelWon) return; 
+  drawing=true; points=[{x,y}];
+}
+
+function moveDraw(x,y){
+  if(!drawing) return; points.push({x,y});
+}
+
+function endDraw(){
+  if(!drawing) return;
+  drawing=false;
+  for(let i=0;i<points.length-1;i++){
+    let p1=points[i], p2=points[i+1];
+    let len=Math.hypot(p2.x-p1.x,p2.y-p1.y);
+    let angle=Math.atan2(p2.y-p1.y,p2.x-p1.x);
+
+    let seg=Bodies.rectangle((p1.x+p2.x)/2,(p1.y+p2.y)/2,len,10,{
+      isStatic:true, friction:0.0002, render:{fillStyle:"#a8ff78"} 
+    });
+    Body.setAngle(seg,angle); paths.push(seg); Composite.add(world,seg);
+  }
+}
+
+document.addEventListener("mousedown",e=>startDraw(e.clientX,e.clientY));
+document.addEventListener("mousemove",e=>moveDraw(e.clientX,e.clientY));
+document.addEventListener("mouseup",endDraw);
+
+document.addEventListener("touchstart",e=>{ let t=e.touches[0]; startDraw(t.clientX,t.clientY); }, {passive: false});
+document.addEventListener("touchmove",e=>{ let t=e.touches[0]; moveDraw(t.clientX,t.clientY); e.preventDefault(); }, {passive: false});
+document.addEventListener("touchend",endDraw);
+
+/** FX LOOP **/
+let particles=[];
+for(let i=0;i<40;i++){
+  particles.push({
+    x:Math.random()*innerWidth, y:Math.random()*innerHeight,
+    vx:(Math.random()-0.5)*0.8, vy:(Math.random()-0.5)*0.8,
+    size: Math.random() * 2 + 1.5, pulse: Math.random() * Math.PI * 2
+  });
+}
+
+function drawFX(){
+  ctx.clearRect(0,0,fx.width,fx.height);
+
+  // Draw 3D Rolling Ball
+  if(ball && ball.position) {
+    let props = ballProps[ballType];
+    ctx.save();
+    ctx.translate(ball.position.x, ball.position.y);
+    ctx.rotate(ball.angle);
+
+    let grad = ctx.createRadialGradient(-5, -5, 2, 0, 0, 15);
+    grad.addColorStop(0, '#ffffff'); 
+    grad.addColorStop(0.3, props.color); 
+    grad.addColorStop(1, props.stroke); 
+
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI*2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 15, 5, 0, 0, Math.PI*2);
+    ctx.strokeStyle = "rgba(0,0,0,0.15)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(8, 0, 3, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Draw Glowing Glass Target
+  if(glass && glass.vertices) {
+    let pulse = 15 + Math.sin(Date.now()*0.005) * 5;
+    ctx.beginPath();
+    ctx.moveTo(glass.vertices[0].x, glass.vertices[0].y);
+    for(let j=1; j<glass.vertices.length; j++) ctx.lineTo(glass.vertices[j].x, glass.vertices[j].y);
+    ctx.closePath();
+    ctx.shadowBlur = pulse; ctx.shadowColor = "#a8ff78";
+    ctx.fillStyle = "rgba(168, 255, 120, 0.2)"; ctx.fill();
+    ctx.strokeStyle = "#a8ff78"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.shadowBlur = 0; 
+  }
+
+  // Draw Fireflies
+  particles.forEach(p=>{
+    let brightness = 0.5 + Math.sin(Date.now()*0.003 + p.pulse)*0.5;
+    ctx.fillStyle=`rgba(200, 255, 150, ${brightness})`;
+    ctx.shadowBlur = 8 * brightness; ctx.shadowColor = "#a8ff78";
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0; 
+
+    p.x+=p.vx; p.y+=p.vy;
+    p.x += Math.sin(Date.now()*0.001 + p.y)*0.5; 
+    if(p.y < -10) p.y = innerHeight + 10;
+    if(p.y > innerHeight + 10) p.y = -10;
+    if(p.x < -10) p.x = innerWidth + 10;
+    if(p.x > innerWidth + 10) p.x = -10;
+  });
+
+  // Dynamic Objects
+  objs.forEach(o=>{
+    if(o.isPortal) {
+      let angle = Date.now() * 0.002;
+      ctx.save();
+      ctx.translate(o.position.x, o.position.y);
+      ctx.rotate(angle);
+      ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI*2);
+      ctx.strokeStyle = o.color; ctx.lineWidth = 3;
+      ctx.setLineDash([10, 10]); ctx.stroke();
+      ctx.rotate(-angle * 2);
+      ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2);
+      ctx.setLineDash([5, 5]); ctx.stroke();
+      
+      ctx.shadowBlur = 20; ctx.shadowColor = o.color;
+      ctx.fillStyle = o.color.replace(')', ', 0.2)').replace('rgb', 'rgba');
+      ctx.fill();
+      ctx.restore();
+    }
+    
+    if(o.isSpike) {
+      ctx.beginPath();
+      ctx.moveTo(o.vertices[0].x, o.vertices[0].y);
+      for(let j=1; j<o.vertices.length; j++) ctx.lineTo(o.vertices[j].x, o.vertices[j].y);
+      ctx.closePath();
+      ctx.shadowBlur = 15; ctx.shadowColor = "#ff0000";
+      ctx.fillStyle = "rgba(231, 76, 60, 0.4)"; ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    if(o.isUpdraft || o.isCurrent || o.isDowndraft){
+      ctx.fillStyle = "rgba(168, 255, 120, 0.08)";
+      ctx.fillRect(o.bounds.min.x, o.bounds.min.y, o.bounds.max.x - o.bounds.min.x, o.bounds.max.y - o.bounds.min.y);
+      let offset = (Date.now() * 0.06) % 40;
+      ctx.fillStyle = "rgba(168, 255, 120, 0.3)";
+      if(o.isUpdraft) for(let i = o.bounds.min.y; i < o.bounds.max.y; i+=40) ctx.fillRect(o.bounds.min.x + 10, i - offset, o.bounds.max.x - o.bounds.min.x - 20, 2);
+      else if (o.isDowndraft) for(let i = o.bounds.min.y; i < o.bounds.max.y; i+=40) ctx.fillRect(o.bounds.min.x + 10, i + offset, o.bounds.max.x - o.bounds.min.x - 20, 2);
+      else if (o.isCurrent) for(let i = o.bounds.min.x; i < o.bounds.max.x; i+=40) ctx.fillRect(i + offset, o.bounds.min.y + 10, 2, o.bounds.max.y - o.bounds.min.y - 20);
+    }
+  });
+
+  requestAnimationFrame(drawFX);
+}
+drawFX();
+
+/** COLLISIONS **/
+Events.on(engine,"collisionStart",e=>{
+  e.pairs.forEach(pair=>{
+    let a=pair.bodyA, b=pair.bodyB;
+    
+    if((a===ball && b.isSpike) || (b===ball && a.isSpike)){
+      resetGame();
+      return;
+    }
+
+    if(teleportCooldown <= 0) {
+      let portal = (a===ball && b.isPortal) ? b : (b===ball && a.isPortal) ? a : null;
+      if(portal) {
+        Body.setPosition(ball, {x: portal.target.position.x, y: portal.target.position.y});
+        teleportCooldown = 20; 
+        playBounce(5); 
+        return;
+      }
+    }
+
+    if((a===ball || b===ball) && !levelWon) {
+      let speed = Vector.magnitude(ball.velocity);
+      if(speed > 1.5) playBounce(speed);
+    }
+
+    if(!levelWon && ((a===ball&&b===glass)||(b===ball&&a===glass))){
+      levelWon = true;
+      let targetX = glass.position.x, targetY = glass.position.y;
+      Composite.remove(world, glass); glass = null; 
+      shatterGlassEffect(targetX, targetY);
+    }
+  });
+});
+
+/** FORCES & UPDATES **/
+Events.on(engine,"beforeUpdate",()=>{
+  if(!ball) return;
+  let time = engine.timing.timestamp;
+  
+  if(teleportCooldown > 0) teleportCooldown--;
+  
+  if(ball.position.y > innerHeight + 200 || ball.position.x < -200 || ball.position.x > innerWidth + 200) {
+    if(!levelWon) resetGame();
+  }
+
+  objs.forEach(o=>{
+    if(o.isUpdraft && !ball.isStatic && Bounds.contains(o.bounds, ball.position)) Body.applyForce(ball, ball.position, {x:0, y: o.forceAmt || -0.004});
+    if(o.isDowndraft && !ball.isStatic && Bounds.contains(o.bounds, ball.position)) Body.applyForce(ball, ball.position, {x:0, y:0.004});
+    if(o.isCurrent && !ball.isStatic && Bounds.contains(o.bounds, ball.position)) Body.applyForce(ball, ball.position, o.forceDir || {x:0.004, y:0});
+    if(o.isSpinner) Body.setAngle(o, o.angle + o.spinSpeed);
+    if(o.isPatrol) Body.setPosition(o, {
+        x: o.startX + Math.sin(time * o.patrolSpeed + o.offset) * o.patrolRangeX,
+        y: o.startY + Math.cos(time * o.patrolSpeed + o.offset) * o.patrolRangeY
+    });
+  });
+});
+
+/** CONTROLS **/
+function launchBall(){
+  if(launched || levelWon) return;
+  launched=true; Body.setStatic(ball,false);
+}
+
+function resetGame(){
+  paths.forEach(p=>Composite.remove(world,p)); paths=[];
+  launched=false; levelWon=false; teleportCooldown=0;
+  document.getElementById("win").style.display="none";
+  loadLevel();
+}
+
+function nextLevel(){
+  currentLevel++;
+  if(currentLevel >= maxLevels) currentLevel = 0; 
+  document.getElementById("levelDisplay").innerText = "Level " + (currentLevel + 1);
+  resetGame();
+}
+
+// INIT
+resetGame();
+</script>
+
+</body>
+</html>
